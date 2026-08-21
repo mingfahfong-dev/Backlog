@@ -1,0 +1,830 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>COA Backlog Monitor — PMLB</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root{
+    --bhp-orange:#E2601D;
+    --bhp-orange-dark:#B84A14;
+    --ink:#1B1E23;
+    --ink-soft:#565C66;
+    --line:#DCDFE3;
+    --bg:#F5F6F7;
+    --card:#FFFFFF;
+    --overdue-bg:#FDECE6;
+    --overdue-line:#E2601D;
+    --port-bg:#E9F1FB;
+    --port-line:#2B6CB0;
+    --both-bg:linear-gradient(90deg,#FDECE6 0 50%,#E9F1FB 50% 100%);
+    --mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg); color:var(--ink); line-height:1.4;
+  }
+  header{
+    background:var(--ink); color:#fff; padding:18px 28px; display:flex; align-items:center; gap:16px;
+    border-bottom:4px solid var(--bhp-orange);
+  }
+  header .logo{font-weight:800; font-size:20px; letter-spacing:0.5px; color:var(--bhp-orange);}
+  header h1{font-size:16px; font-weight:600; margin:0; color:#fff;}
+  header p{margin:2px 0 0; font-size:12px; color:#B7BCC4;}
+  main{max-width:1200px; margin:0 auto; padding:20px 24px 60px;}
+
+  .upload-zone{
+    background:var(--card); border:2px dashed var(--line); border-radius:10px; padding:28px;
+    text-align:center; margin-bottom:20px; transition:border-color .15s, background .15s;
+  }
+  .upload-zone.drag{border-color:var(--bhp-orange); background:#FFF6F1;}
+  .upload-zone p{margin:0 0 12px; color:var(--ink-soft); font-size:14px;}
+  .upload-zone input[type=file]{display:none;}
+  .btn{
+    display:inline-block; background:var(--bhp-orange); color:#fff; border:none; padding:10px 20px;
+    border-radius:6px; font-size:14px; font-weight:600; cursor:pointer;
+  }
+  .btn:hover{background:var(--bhp-orange-dark);}
+  .btn.secondary{background:#fff; color:var(--ink); border:1px solid var(--line);}
+  .btn.secondary:hover{background:#F0F1F2;}
+  .filename{font-size:12px; color:var(--ink-soft); margin-top:10px;}
+
+  .status-msg{font-size:13px; padding:10px 14px; border-radius:6px; margin-bottom:16px; display:none;}
+  .status-msg.error{display:block; background:#FDECEA; color:#8A2A1E; border:1px solid #F3B9AE;}
+  .status-msg.warn{display:block; background:#FFF6E5; color:#7A5200; border:1px solid #F0D48A;}
+  .status-msg.ok{display:block; background:#E9F6EE; color:#1E6B3B; border:1px solid #A9DDBB;}
+
+  .cards{display:grid; grid-template-columns:repeat(auto-fit, minmax(160px,1fr)); gap:12px; margin-bottom:22px;}
+  .card{background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px 16px;}
+  .card .label{font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--ink-soft); margin-bottom:6px;}
+  .card .value{font-size:24px; font-weight:700; font-family:var(--mono);}
+  .card .sub{font-size:11px; color:var(--ink-soft); margin-top:4px;}
+
+  .panel{background:var(--card); border:1px solid var(--line); border-radius:10px; padding:18px 20px; margin-bottom:20px;}
+  .panel h2{font-size:14px; margin:0 0 12px; font-weight:700;}
+  .lag-table{width:100%; border-collapse:collapse; font-size:12px;}
+  .lag-table th, .lag-table td{padding:6px 8px; text-align:center; border-bottom:1px solid var(--line); font-family:var(--mono);}
+  .lag-table th{text-align:left; font-family:inherit; color:var(--ink-soft); font-weight:600;}
+  .lag-table td:first-child, .lag-table th:first-child{text-align:left; font-family:inherit; font-weight:600;}
+
+  .toolbar{display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:14px;}
+  .toolbar input[type=search]{
+    flex:1; min-width:180px; padding:9px 12px; border:1px solid var(--line); border-radius:6px; font-size:13px;
+  }
+
+  table.data{width:100%; table-layout:fixed; border-collapse:collapse; font-size:11.5px; background:var(--card);}
+  table.data th{
+    background:#F0F1F2; text-align:left; padding:8px 8px; font-weight:600; color:var(--ink-soft);
+    cursor:pointer; user-select:none; border-bottom:1px solid var(--line); white-space:normal; word-break:break-word;
+  }
+  table.data th:hover{color:var(--ink);}
+  table.data th.sorted::after{content:" \25BE"; color:var(--bhp-orange);}
+  table.data th.sorted.asc::after{content:" \25B4";}
+  table.data td{padding:7px 8px; border-bottom:1px solid var(--line); font-family:var(--mono); white-space:normal; word-break:break-word;}
+  table.data td.customer, table.data td.vessel{font-family:inherit;}
+  table.data tbody tr.overdue{background:var(--overdue-bg); border-left:3px solid var(--overdue-line);}
+  table.data tbody tr.port{background:var(--port-bg); border-left:3px solid var(--port-line);}
+  table.data tbody tr.overdue.port{background:var(--both-bg); border-left:3px solid var(--ink);}
+  table.data tbody tr:hover{filter:brightness(0.97);}
+  table.data tbody tr{cursor:pointer;}
+  table.data tbody tr.processed{position:relative;}
+  table.data tbody tr.processed td{color:#9A9FA6;}
+  table.data tbody tr.processed td.customer, table.data tbody tr.processed td.vessel{color:#AEB2B9;}
+  table.data tbody tr.processed::before{
+    content:''; position:absolute; left:1%; right:16%; top:50%; height:0;
+    border-top:2.5px solid #C81E1E;
+    transform:translateY(-50%) rotate(-1.4deg);
+    filter:drop-shadow(0 1px 1px rgba(200,30,30,0.35));
+    pointer-events:none; z-index:3;
+  }
+  table.data tbody tr.processed::after{
+    content:'DONE'; position:absolute; right:10px; top:50%;
+    transform:translateY(-50%) rotate(-9deg);
+    font-size:11px; font-weight:800; letter-spacing:2px; color:#C81E1E;
+    border:2px solid #C81E1E; border-radius:4px; padding:1px 7px;
+    background:rgba(255,255,255,0.82);
+    box-shadow:0 0 0 1px rgba(200,30,30,0.25) inset;
+    pointer-events:none; z-index:3;
+  }
+  .table-wrap{overflow-x:hidden; border:1px solid var(--line); border-radius:10px;}
+  .table-wrap table{border-radius:10px; overflow:hidden;}
+
+  .row-count{font-size:12px; color:var(--ink-soft); margin-bottom:8px;}
+  details.debug{margin-top:24px; font-size:12px; color:var(--ink-soft);}
+  details.debug summary{cursor:pointer; font-weight:600;}
+  details.debug pre{white-space:pre-wrap; background:#fff; border:1px solid var(--line); border-radius:6px; padding:12px; max-height:300px; overflow:auto;}
+  .hidden{display:none;}
+  .spinner{width:16px;height:16px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;display:inline-block;animation:spin .7s linear infinite;vertical-align:-3px;margin-right:6px;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+
+  .nav-tabs{display:flex; gap:6px; margin-left:auto;}
+  .nav-tabs button{
+    background:transparent; border:1px solid #3A3F47; color:#B7BCC4; padding:8px 16px;
+    border-radius:6px; font-size:13px; font-weight:600; cursor:pointer;
+  }
+  .nav-tabs button.active{background:var(--bhp-orange); border-color:var(--bhp-orange); color:#fff;}
+  .nav-tabs button:not(.active):hover{border-color:var(--bhp-orange); color:#fff;}
+
+  .bar-chart{display:flex; align-items:flex-end; gap:6px; height:180px; padding:10px 4px 0; border-bottom:1px solid var(--line);}
+  .bar-chart .bar-col{flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; height:100%;}
+  .bar-chart .bar-count{font-size:11px; color:var(--ink-soft); font-family:var(--mono); margin-bottom:4px;}
+  .bar-chart .bar{width:100%; max-width:34px; background:var(--bhp-orange); border-radius:4px 4px 0 0; min-height:2px;}
+  .bar-chart .bar.zero{background:#E5E7E9;}
+  .bar-labels{display:flex; gap:6px; padding:6px 4px 0;}
+  .bar-labels .bar-lbl{flex:1; text-align:center; font-size:11px; color:var(--ink-soft);}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">BHP</div>
+  <div>
+    <h1 id="pageTitle">COA Backlog Monitor <span style="font-weight:400;color:#B7BCC4;">v17</span></h1>
+    <p id="pageSubtitle">PMLB — upload a COA Status PDF export to view it interactively</p>
+  </div>
+  <div class="nav-tabs">
+    <button id="navBacklog" class="active">Backlog Monitor</button>
+    <button id="navTurnaround">L1 COA Backlog for Dummies</button>
+  </div>
+</header>
+
+<main>
+<section id="pageBacklog">
+  <div class="upload-zone" id="dropZone">
+    <p><strong>Drag and drop</strong> the COA Status PDF here, or choose a file</p>
+    <label class="btn" for="fileInput">Choose PDF</label>
+    <input type="file" id="fileInput" accept="application/pdf">
+    <div class="filename" id="fileName"></div>
+  </div>
+
+  <div id="statusMsg" class="status-msg"></div>
+
+  <div id="content" class="hidden">
+
+    <div class="cards" id="summaryCards"></div>
+
+    <div class="panel" id="lagPanel"></div>
+
+    <div class="panel">
+      <h2>Backlog detail</h2>
+      <div class="toolbar">
+        <input type="search" id="searchBox" placeholder="Search customer or vessel...">
+        <button class="btn secondary" id="toggleNotReady">Hide COA Not Ready</button>
+      </div>
+      <div class="row-count" id="rowCount"></div>
+      <div class="table-wrap">
+        <table class="data" id="dataTable">
+          <colgroup id="colGroup"></colgroup>
+          <thead><tr id="headRow"></tr></thead>
+          <tbody id="bodyRows"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <details class="debug">
+      <summary>Debug / raw extracted text (use this if parsing looks wrong on a new export)</summary>
+      <pre id="debugText"></pre>
+    </details>
+  </div>
+</section>
+
+<section id="pageTurnaround" class="hidden">
+  <div class="panel">
+    <h2>Add a day's data</h2>
+    <p style="font-size:12px;color:var(--ink-soft);margin:-4px 0 12px;">Upload that day's COA Status PDF (Summary Report) and the CoA Report Excel (.xlsm) together — the day is read from the PDF's report date. The Excel's <strong>Print</strong> tab is used for the backlog count and turnaround hours.</p>
+    <div style="display:flex; gap:16px; flex-wrap:wrap;">
+      <div class="upload-zone" id="dropZonePdf3" style="flex:1; min-width:240px; padding:18px;">
+        <p><strong>COA Status PDF</strong></p>
+        <label class="btn" for="fileInputPdf3">Choose PDF</label>
+        <input type="file" id="fileInputPdf3" accept="application/pdf">
+        <div class="filename" id="fileNamePdf3"></div>
+      </div>
+      <div class="upload-zone" id="dropZoneKpi3" style="flex:1; min-width:240px; padding:18px;">
+        <p><strong>CoA Report Excel (.xlsm, Print tab)</strong></p>
+        <label class="btn" for="fileInputKpi3">Choose Excel file</label>
+        <input type="file" id="fileInputKpi3" accept=".xlsm,.xlsx,.xls">
+        <div class="filename" id="fileNameKpi3"></div>
+      </div>
+    </div>
+    <div id="statusMsg3" class="status-msg" style="margin-top:14px;"></div>
+    <button class="btn" id="addDayBtn" style="margin-top:10px;" disabled>Add / update this day</button>
+  </div>
+
+  <div class="panel">
+    <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px;">
+      <h2 id="turnaroundMonthTitle" style="margin:0;">CoA Turnaround (hours)</h2>
+      <select id="monthSelect" style="margin-left:auto; padding:6px 10px; border:1px solid var(--line); border-radius:6px; font-size:12px;"></select>
+    </div>
+    <div id="turnaroundLineChart"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Backlog detail by day</h2>
+    <div class="table-wrap" style="overflow-x:auto;">
+      <table class="data" id="turnaroundTable" style="table-layout:auto;"></table>
+    </div>
+    <button class="btn secondary" id="clearMonthBtn" style="margin-top:12px;">Clear stored data</button>
+  </div>
+</section>
+
+  <footer style="margin-top:32px; padding-top:14px; border-top:1px solid var(--line); font-size:11px; color:var(--ink-soft);">
+    COA Backlog Interactive Tool — v17
+  </footer>
+</main>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+const COLS = ["COA Status","Backlog Days","Berth","Inspection Lot","Nomination Number","Cclas Code","Customer Name","Vessel Name","Actual Time Arrived","Official Start Time","Official Finish Time","Reconciled WMT","Consig Code","COA Auth Lvl"];
+const REF_WIDTH = 1189.44;
+const BOUND_X0 = [21.4986,69.488,117.568,168.56,233.36,284.352,332.432,496.224,595.824,646.816,724.416,795.216,930.416,978.496];
+const TABLE_END = 1040.805;
+const MAX_BACKLOG_DAYS = 50;
+
+let allRows = [];
+let processedIds = new Set();
+let sortState = {col: 1, asc: false};
+
+const fileInput = document.getElementById('fileInput');
+const dropZone = document.getElementById('dropZone');
+const statusMsg = document.getElementById('statusMsg');
+const content = document.getElementById('content');
+const fileNameEl = document.getElementById('fileName');
+const debugText = document.getElementById('debugText');
+
+fileInput.addEventListener('change', e => { if(e.target.files[0]) handleFile(e.target.files[0]); });
+['dragenter','dragover'].forEach(ev => dropZone.addEventListener(ev, e => { e.preventDefault(); dropZone.classList.add('drag'); }));
+['dragleave','drop'].forEach(ev => dropZone.addEventListener(ev, e => { e.preventDefault(); dropZone.classList.remove('drag'); }));
+dropZone.addEventListener('drop', e => { const f = e.dataTransfer.files[0]; if(f) handleFile(f); });
+
+function showStatus(type, msg){
+  statusMsg.className = 'status-msg ' + type;
+  statusMsg.textContent = msg;
+}
+function clearStatus(){
+  statusMsg.className = 'status-msg';
+  statusMsg.textContent = '';
+}
+
+async function handleFile(file){
+  clearStatus();
+  content.classList.add('hidden');
+  fileNameEl.textContent = 'Parsing ' + file.name + '...';
+  try{
+    const buf = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({data: buf}).promise;
+    let detailRows = [];
+    let summaryText = '';
+    let debugDump = '';
+
+    for(let p = 1; p <= pdf.numPages; p++){
+      const page = await pdf.getPage(p);
+      const viewport = page.getViewport({scale:1});
+      const tc = await page.getTextContent();
+      const items = tc.items.map(it => ({
+        str: it.str,
+        x: it.transform[4],
+        y: it.transform[5]
+      })).filter(it => it.str && it.str.trim().length > 0);
+      const fullText = items.map(i=>i.str).join(' ');
+      debugDump += '--- page ' + p + ' ---\n' + fullText + '\n\n';
+
+      if(/COA\s*Status/i.test(fullText) && /Backlog\s*Days/i.test(fullText)){
+        const rows = extractDetailRows(items, viewport.width);
+        detailRows = detailRows.concat(rows);
+      } else if(/Days of Backlog/i.test(fullText) || /CoAs in Backlog/i.test(fullText)){
+        summaryText += ' ' + fullText;
+      }
+    }
+
+    debugText.textContent = debugDump;
+
+    if(detailRows.length === 0){
+      showStatus('warn', 'Could not find a detailed COA Backlog table in this PDF. Check the debug panel below to see what was extracted, and let me know so the parser can be tuned to this layout.');
+    } else {
+      const disregarded = detailRows.filter(r => r.backlogDays > MAX_BACKLOG_DAYS).length;
+      let msg = 'Loaded ' + detailRows.length + ' backlog line' + (detailRows.length===1?'':'s') + '.';
+      if(disregarded > 0) msg += ' ' + disregarded + ' row' + (disregarded===1?'':'s') + ' with backlog over ' + MAX_BACKLOG_DAYS + ' days disregarded.';
+      showStatus('ok', msg);
+    }
+
+    allRows = detailRows.filter(r => r.backlogDays <= MAX_BACKLOG_DAYS);
+    allRows.forEach((r,i) => r.id = 'r' + i);
+    processedIds = new Set();
+    fileNameEl.textContent = 'Loaded: ' + file.name;
+
+    renderSummary(summaryText);
+    renderTableHead();
+    applyFiltersAndRender();
+    content.classList.remove('hidden');
+
+  } catch(err){
+    showStatus('error', 'Could not parse this PDF: ' + err.message + '. The file may be a scanned image rather than text, or in an unexpected format.');
+    fileNameEl.textContent = '';
+  }
+}
+
+function extractDetailRows(items, pageWidth){
+  const scale = pageWidth / REF_WIDTH;
+  const bounds = BOUND_X0.map(x => x * scale);
+  const tableEnd = TABLE_END * scale;
+
+  const sorted = items.slice().sort((a,b) => b.y - a.y);
+  const lines = [];
+  const TOL = 3;
+  for(const it of sorted){
+    let line = lines.find(l => Math.abs(l.y - it.y) < TOL);
+    if(!line){ line = {y: it.y, items: []}; lines.push(line); }
+    line.items.push(it);
+  }
+
+  const rows = [];
+  let lastStatus = '';
+  for(const line of lines){
+    const cells = new Array(COLS.length).fill('');
+    for(const it of line.items.sort((a,b)=>a.x-b.x)){
+      let colIdx = 0;
+      for(let i = 0; i < bounds.length; i++){
+        if(it.x >= bounds[i]) colIdx = i;
+      }
+      if(it.x > tableEnd + 20) continue;
+      cells[colIdx] = (cells[colIdx] + ' ' + it.str).trim();
+    }
+    const backlogRaw = cells[1].trim();
+    if(!/^-?\d+$/.test(backlogRaw)) continue;
+
+    const status = cells[0].trim() || lastStatus;
+    if(cells[0].trim()) lastStatus = cells[0].trim();
+
+    rows.push({
+      status: status,
+      backlogDays: parseInt(backlogRaw, 10),
+      berth: cells[2].trim(),
+      poNo: cells[3].trim(),
+      inspectionLot: cells[4].trim(),
+      cclasCode: cells[5].trim(),
+      customer: cells[6].trim(),
+      vessel: cells[7].trim(),
+      actualArrived: cells[8].trim(),
+      officialStart: cells[9].trim(),
+      officialFinish: cells[10].trim(),
+      wmt: cells[11].trim(),
+      consig: cells[12].trim(),
+      authLvl: cells[13].trim()
+    });
+  }
+  return rows;
+}
+
+function renderSummary(summaryText){
+  const cardsEl = document.getElementById('summaryCards');
+  const lagPanel = document.getElementById('lagPanel');
+  cardsEl.innerHTML = '';
+  lagPanel.innerHTML = '';
+
+  const text = summaryText.replace(/\s+/g,' ').trim();
+  const overdueCount = allRows.filter(r => r.backlogDays > 3).length;
+  const portCount = allRows.filter(r => /port hedland/i.test(r.customer)).length;
+
+  let cardsHtml = '';
+  cardsHtml += card('Total CoAs in backlog', allRows.length, '>' + MAX_BACKLOG_DAYS + '-day rows disregarded');
+  cardsHtml += card('Backlog &gt; 3 days', overdueCount, 'highlighted below');
+  cardsHtml += card('Tulip Shipment', portCount, 'highlighted below');
+  cardsEl.innerHTML = cardsHtml;
+
+  if(!text){
+    lagPanel.innerHTML = '';
+    return;
+  }
+
+  const backlogMatch = text.match(/Days of Backlog\s+([\-0-9\s]+?)\s+Count of Cargoes\s+([0-9\s]+?)(?=\s*(?:Days of Lag|CoAs in Backlog|COA|$))/i);
+
+  let lagHtml = '<h2>COA backlog age (from source summary)</h2>';
+  if(backlogMatch){
+    const days = backlogMatch[1].trim().split(/\s+/);
+    const counts = backlogMatch[2].trim().split(/\s+/);
+    const nPairs = Math.min(days.length, counts.length);
+    const kept = [];
+    for(let i=0;i<nPairs;i++){
+      const d = days[i];
+      if(parseInt(d,10) <= MAX_BACKLOG_DAYS) kept.push({d, c: counts[i]});
+    }
+    if(kept.length){
+      lagHtml += '<table class="lag-table"><tr><th>Days of backlog</th>' + kept.map(p=>'<td>'+p.d+'</td>').join('') + '</tr>';
+      lagHtml += '<tr><th>Count of cargoes</th>' + kept.map(p=>'<td>'+p.c+'</td>').join('') + '</tr></table>';
+    }
+  }
+  if(!backlogMatch){
+    lagHtml += '<p style="font-size:12px;color:var(--ink-soft)">Could not parse the summary page table — see debug panel below for raw text.</p>';
+  }
+  lagPanel.innerHTML = lagHtml;
+}
+
+function card(label, value, sub){
+  return '<div class="card"><div class="label">'+label+'</div><div class="value">'+value+'</div><div class="sub">'+sub+'</div></div>';
+}
+
+const HIDDEN_COLS = [0,4,8];
+const COL_WIDTHS = {1:'7%',2:'5%',3:'9%',5:'6%',6:'20%',7:'14%',9:'9%',10:'12%',11:'8%',12:'6%',13:'4%'};
+function renderTableHead(){
+  const headRow = document.getElementById('headRow');
+  const colgroup = document.getElementById('colGroup');
+  colgroup.innerHTML = COLS.map((c,i) => HIDDEN_COLS.includes(i) ? '' : '<col style="width:'+(COL_WIDTHS[i]||'8%')+'">').join('');
+  headRow.innerHTML = COLS.map((c,i) => HIDDEN_COLS.includes(i) ? '' : '<th data-idx="'+i+'">'+c+'</th>').join('');
+  headRow.querySelectorAll('th').forEach(th => {
+    th.addEventListener('click', () => {
+      const idx = parseInt(th.dataset.idx,10);
+      if(sortState.col === idx) sortState.asc = !sortState.asc;
+      else { sortState.col = idx; sortState.asc = true; }
+      applyFiltersAndRender();
+    });
+  });
+}
+
+const FIELD_ORDER = ['status','backlogDays','berth','poNo','inspectionLot','cclasCode','customer','vessel','actualArrived','officialStart','officialFinish','wmt','consig','authLvl'];
+let hideNotReady = false;
+
+function applyFiltersAndRender(){
+  const q = document.getElementById('searchBox').value.trim().toLowerCase();
+  let rows = allRows.filter(r => !q || r.customer.toLowerCase().includes(q) || r.vessel.toLowerCase().includes(q));
+  if(hideNotReady){
+    rows = rows.filter(r => r.poNo.trim() !== '' && r.wmt.trim() !== '');
+  }
+
+  const key = FIELD_ORDER[sortState.col];
+  rows = rows.slice().sort((a,b) => {
+    let av = a[key], bv = b[key];
+    if(typeof av === 'number' && typeof bv === 'number') return sortState.asc ? av-bv : bv-av;
+    av = (av||'').toString().toLowerCase(); bv = (bv||'').toString().toLowerCase();
+    if(av < bv) return sortState.asc ? -1 : 1;
+    if(av > bv) return sortState.asc ? 1 : -1;
+    return 0;
+  });
+
+  document.querySelectorAll('#headRow th').forEach(th => th.classList.remove('sorted','asc'));
+  const activeTh = document.querySelector('#headRow th[data-idx="'+sortState.col+'"]');
+  if(activeTh){ activeTh.classList.add('sorted'); if(sortState.asc) activeTh.classList.add('asc'); }
+
+  const body = document.getElementById('bodyRows');
+  body.innerHTML = rows.map(r => {
+    const overdue = r.backlogDays > 3;
+    const port = /port hedland/i.test(r.customer);
+    const processed = processedIds.has(r.id);
+    const cls = (overdue?'overdue ':'') + (port?'port ':'') + (processed?'processed':'');
+    return '<tr class="'+cls.trim()+'" data-id="'+r.id+'">'
+      + '<td>'+r.backlogDays+'</td>'
+      + '<td>'+esc(r.berth)+'</td>'
+      + '<td>'+esc(r.poNo)+'</td>'
+      + '<td>'+esc(r.cclasCode)+'</td>'
+      + '<td class="customer">'+esc(r.customer)+'</td>'
+      + '<td class="vessel">'+esc(r.vessel)+'</td>'
+      + '<td>'+esc(r.officialStart)+'</td>'
+      + '<td>'+esc(r.officialFinish)+'</td>'
+      + '<td>'+esc(r.wmt)+'</td>'
+      + '<td>'+esc(r.consig)+'</td>'
+      + '<td>'+esc(r.authLvl)+'</td>'
+      + '</tr>';
+  }).join('');
+
+  document.getElementById('rowCount').textContent = rows.length + ' of ' + allRows.length + ' rows shown';
+  window._currentRows = rows;
+}
+
+function esc(s){
+  return (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+document.getElementById('searchBox').addEventListener('input', applyFiltersAndRender);
+
+document.getElementById('bodyRows').addEventListener('click', (e) => {
+  const tr = e.target.closest('tr');
+  if(!tr) return;
+  const id = tr.dataset.id;
+  if(processedIds.has(id)){ processedIds.delete(id); tr.classList.remove('processed'); }
+  else { processedIds.add(id); tr.classList.add('processed'); }
+});
+
+document.getElementById('toggleNotReady').addEventListener('click', (e) => {
+  hideNotReady = !hideNotReady;
+  e.target.textContent = hideNotReady ? 'Show COA Not Ready' : 'Hide COA Not Ready';
+  applyFiltersAndRender();
+});
+
+// ---------- Page navigation ----------
+const navBacklog = document.getElementById('navBacklog');
+const navTurnaround = document.getElementById('navTurnaround');
+const pageBacklog = document.getElementById('pageBacklog');
+const pageTurnaround = document.getElementById('pageTurnaround');
+const pageTitle = document.getElementById('pageTitle');
+const pageSubtitle = document.getElementById('pageSubtitle');
+
+const NAV = [
+  {btn: navBacklog, page: pageBacklog, title: 'COA Backlog Monitor', sub: 'PMLB — upload a COA Status PDF export to view it interactively'},
+  {btn: navTurnaround, page: pageTurnaround, title: 'CoA Turnaround (hours)', sub: 'PMLB — upload a day\'s PDF + CoA Report Excel (Print tab) to plot that day', onShow: renderTurnaroundPage}
+];
+NAV.forEach(entry => {
+  entry.btn.addEventListener('click', () => {
+    NAV.forEach(e => { e.btn.classList.toggle('active', e===entry); e.page.classList.toggle('hidden', e!==entry); });
+    pageTitle.innerHTML = entry.title + ' <span style="font-weight:400;color:#B7BCC4;">v17</span>';
+    pageSubtitle.textContent = entry.sub;
+    if(entry.onShow) entry.onShow();
+  });
+});
+
+// ---------- CoA Turnaround (page 3) ----------
+const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const STORE_KEY = 'coa_turnaround_data_v1';
+let pendingPdf3 = null;   // {monthKey, day, highestDay, countAtHighestDay}
+let pendingKpi3 = null;   // {lst, avgHours}
+
+function loadTurnaroundStore(){
+  try{ return JSON.parse(localStorage.getItem(STORE_KEY) || '{}'); }
+  catch(e){ return {}; }
+}
+function saveTurnaroundStore(store){
+  localStorage.setItem(STORE_KEY, JSON.stringify(store));
+}
+
+const fileInputPdf3 = document.getElementById('fileInputPdf3');
+const fileInputKpi3 = document.getElementById('fileInputKpi3');
+const fileNamePdf3 = document.getElementById('fileNamePdf3');
+const fileNameKpi3 = document.getElementById('fileNameKpi3');
+const statusMsg3 = document.getElementById('statusMsg3');
+const addDayBtn = document.getElementById('addDayBtn');
+
+function showStatus3(type, msg){
+  statusMsg3.className = 'status-msg ' + type;
+  statusMsg3.textContent = msg;
+}
+function maybeEnableAddDay(){
+  addDayBtn.disabled = !(pendingPdf3 && pendingKpi3);
+  if(pendingPdf3 && pendingKpi3){
+    showStatus3('ok', 'Both files parsed for ' + pendingPdf3.day + ' ' + MONTH_NAMES[pendingPdf3.monthIdx] + ' ' + pendingPdf3.year + '. Click "Add / update this day" to save.');
+  }
+}
+
+fileInputPdf3.addEventListener('change', e => { if(e.target.files[0]) parsePdf3(e.target.files[0]); });
+fileInputKpi3.addEventListener('change', e => { if(e.target.files[0]) parseKpi3(e.target.files[0]); });
+
+async function parsePdf3(file){
+  fileNamePdf3.textContent = 'Parsing ' + file.name + '...';
+  pendingPdf3 = null;
+  try{
+    const buf = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({data: buf}).promise;
+    let summaryText = '';
+    for(let p = 1; p <= pdf.numPages; p++){
+      const page = await pdf.getPage(p);
+      const tc = await page.getTextContent();
+      const fullText = tc.items.map(i=>i.str).join(' ');
+      if(/Days of Backlog/i.test(fullText) || /CoAs in Backlog/i.test(fullText)){
+        summaryText += ' ' + fullText;
+      }
+    }
+    const text = summaryText.replace(/\s+/g,' ').trim();
+    const dateMatch = text.match(/to\s+(\d{1,2})\/(\d{2})\/(\d{2})\s+\d{1,2}:\d{2}\s*am/i);
+    const backlogMatch = text.match(/Days of Backlog\s+([\-0-9\s]+?)\s+Count of Cargoes\s+([0-9\s]+?)(?=\s*(?:Days of Lag|CoAs in Backlog|COA|$))/i);
+    if(!dateMatch || !backlogMatch){
+      showStatus3('error', 'Could not find the report date or Days of Backlog table in this PDF (expected the COA Status Summary Report page).');
+      fileNamePdf3.textContent = '';
+      return;
+    }
+    const day = parseInt(dateMatch[1],10);
+    const monthIdx = parseInt(dateMatch[2],10) - 1;
+    const year = 2000 + parseInt(dateMatch[3],10);
+    const days = backlogMatch[1].trim().split(/\s+/).map(Number);
+    const counts = backlogMatch[2].trim().split(/\s+/).map(Number);
+    const nPairs = Math.min(days.length, counts.length);
+    const kept = [];
+    for(let i=0;i<nPairs;i++){
+      if(days[i] <= MAX_BACKLOG_DAYS) kept.push({d: days[i], c: counts[i]});
+    }
+    if(kept.length === 0){
+      showStatus3('error', 'No backlog-day entries at or under ' + MAX_BACKLOG_DAYS + ' days were found in this PDF.');
+      fileNamePdf3.textContent = '';
+      return;
+    }
+    const top = kept.reduce((a,b) => b.d > a.d ? b : a);
+    pendingPdf3 = {monthIdx, day, year, highestDay: top.d, countAtHighestDay: top.c};
+    fileNamePdf3.textContent = 'Loaded: ' + file.name;
+    maybeEnableAddDay();
+  } catch(err){
+    showStatus3('error', 'Could not parse this PDF: ' + err.message);
+    fileNamePdf3.textContent = '';
+  }
+}
+
+async function parseKpi3(file){
+  fileNameKpi3.textContent = 'Parsing ' + file.name + '...';
+  pendingKpi3 = null;
+  try{
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, {type:'array', cellDates:false});
+    const sheetName = wb.SheetNames.find(n => /^print$/i.test(n)) || wb.SheetNames.find(n => /print/i.test(n));
+    if(!sheetName){
+      showStatus3('error', 'Could not find a "Print" tab in this Excel file — expected the CoA_Report.xlsm layout.');
+      fileNameKpi3.textContent = '';
+      return;
+    }
+    const sheet = wb.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(sheet, {header:1, raw:true, defval:null});
+    if(!rows || rows.length < 2){
+      showStatus3('error', 'Could not find data rows in the Print tab.');
+      fileNameKpi3.textContent = '';
+      return;
+    }
+
+    const SECTION_NAMES = ['Cargo Loading','Cargo Finished','Lab Started','Lab Finished'];
+    let currentSection = null;
+    let coaIdx = -1;
+    const sectionCounts = {};
+    const labFinishedCoaVals = [];
+    let excelDateStr = null;
+
+    const b1 = rows[0] && rows[0][1];
+    if(b1) excelDateStr = b1.toString().trim();
+
+    for(let i=1;i<rows.length;i++){
+      const r = rows[i];
+      if(!r || r.every(c => c===null || c==='')) continue;
+      const first = (r[0]||'').toString().trim();
+
+      if(SECTION_NAMES.some(n => n.toLowerCase()===first.toLowerCase())){
+        currentSection = SECTION_NAMES.find(n => n.toLowerCase()===first.toLowerCase());
+        continue;
+      }
+      if(first.toLowerCase()==='job number'){
+        if(coaIdx===-1) coaIdx = r.findIndex(h => /coa wait time/i.test((h||'').toString()));
+        continue;
+      }
+      // subtotal row: first two cells blank, a number sits in column C (index 2)
+      if(currentSection && (r[0]===null||r[0]==='') && (r[1]===null||r[1]==='') && typeof r[2]==='number'){
+        sectionCounts[currentSection] = r[2];
+        continue;
+      }
+      // data row within a section
+      if(currentSection && first){
+        if(currentSection==='Lab Finished' && coaIdx!==-1 && typeof r[coaIdx]==='number' && !isNaN(r[coaIdx])){
+          labFinishedCoaVals.push(r[coaIdx]);
+        }
+      }
+    }
+
+    if(sectionCounts['Lab Started']===undefined || sectionCounts['Lab Finished']===undefined){
+      showStatus3('error', 'Could not find the Lab Started / Lab Finished section totals in the Print tab.');
+      fileNameKpi3.textContent = '';
+      return;
+    }
+
+    const cargoInBacklog = sectionCounts['Lab Started'] + sectionCounts['Lab Finished'];
+    const avgHours = labFinishedCoaVals.length ? labFinishedCoaVals.reduce((a,b)=>a+b,0)/labFinishedCoaVals.length : null;
+    pendingKpi3 = {lst: cargoInBacklog, avgHours, excelDateStr};
+    fileNameKpi3.textContent = 'Loaded: ' + file.name;
+    maybeEnableAddDay();
+  } catch(err){
+    showStatus3('error', 'Could not parse this Excel file: ' + err.message);
+    fileNameKpi3.textContent = '';
+  }
+}
+
+addDayBtn.addEventListener('click', () => {
+  if(!pendingPdf3 || !pendingKpi3) return;
+  const store = loadTurnaroundStore();
+  const monthKey = pendingPdf3.year + '-' + String(pendingPdf3.monthIdx+1).padStart(2,'0');
+  if(!store[monthKey]) store[monthKey] = {};
+  store[monthKey][pendingPdf3.day] = {
+    cargoInBacklog: pendingKpi3.lst,
+    pqBacklogCount: pendingPdf3.countAtHighestDay,
+    pqHighestDay: pendingPdf3.highestDay,
+    turnaroundHours: pendingKpi3.avgHours
+  };
+  saveTurnaroundStore(store);
+  showStatus3('ok', 'Saved ' + pendingPdf3.day + ' ' + MONTH_NAMES[pendingPdf3.monthIdx] + ' ' + pendingPdf3.year + '.');
+  pendingPdf3 = null; pendingKpi3 = null;
+  fileInputPdf3.value = ''; fileInputKpi3.value = '';
+  fileNamePdf3.textContent = ''; fileNameKpi3.textContent = '';
+  addDayBtn.disabled = true;
+  populateMonthSelect(monthKey);
+  renderTurnaroundPage();
+});
+
+document.getElementById('clearMonthBtn').addEventListener('click', () => {
+  const sel = document.getElementById('monthSelect').value;
+  if(!sel) return;
+  const store = loadTurnaroundStore();
+  delete store[sel];
+  saveTurnaroundStore(store);
+  populateMonthSelect();
+  renderTurnaroundPage();
+});
+
+function populateMonthSelect(preferKey){
+  const store = loadTurnaroundStore();
+  const keys = Object.keys(store).sort();
+  const sel = document.getElementById('monthSelect');
+  sel.innerHTML = keys.map(k => {
+    const [y,m] = k.split('-');
+    return '<option value="'+k+'">'+MONTH_NAMES[parseInt(m,10)-1]+' '+y+'</option>';
+  }).join('');
+  if(keys.length===0){ sel.innerHTML = '<option value="">No data yet</option>'; return; }
+  sel.value = (preferKey && keys.includes(preferKey)) ? preferKey : keys[keys.length-1];
+}
+document.getElementById('monthSelect').addEventListener('change', renderTurnaroundPage);
+
+function daysInMonth(monthKey){
+  const [y,m] = monthKey.split('-').map(Number);
+  return new Date(y, m, 0).getDate();
+}
+
+function renderTurnaroundPage(){
+  populateMonthSelect(document.getElementById('monthSelect').value || undefined);
+  const monthKey = document.getElementById('monthSelect').value;
+  const chartEl = document.getElementById('turnaroundLineChart');
+  const tableEl = document.getElementById('turnaroundTable');
+  const titleEl = document.getElementById('turnaroundMonthTitle');
+
+  if(!monthKey){
+    titleEl.textContent = 'CoA Turnaround (hours)';
+    chartEl.innerHTML = '<p style="font-size:12px;color:var(--ink-soft)">No days added yet — upload a PDF + CoA Report Excel pair above.</p>';
+    tableEl.innerHTML = '';
+    return;
+  }
+  const store = loadTurnaroundStore();
+  const monthData = store[monthKey] || {};
+  const [y,m] = monthKey.split('-').map(Number);
+  titleEl.textContent = 'CoA Turnaround (hours) — ' + MONTH_NAMES[m-1] + ' ' + y;
+  const nDays = daysInMonth(monthKey);
+
+  // ---- SVG line chart ----
+  const W = Math.max(700, nDays*32), H = 260, padL = 40, padR = 20, padT = 14, padB = 30;
+  const values = [];
+  for(let d=1; d<=nDays; d++){
+    const e = monthData[d];
+    values.push(e && typeof e.turnaroundHours === 'number' ? e.turnaroundHours : null);
+  }
+  const present = values.filter(v => v!==null);
+  const maxVal = Math.max(120, ...present, 10);
+  const xFor = d => padL + ((d-1)/(nDays-1)) * (W-padL-padR);
+  const yFor = v => H-padB - (v/maxVal) * (H-padT-padB);
+
+  let path = '';
+  values.forEach((v,i) => { if(v!==null){ const cmd = path?'L':'M'; path += cmd+xFor(i+1)+','+yFor(v)+' '; } });
+
+  let svg = '<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:260px;">';
+  // reference lines: 3-day stretch target (72h) and 5-day target (120h)
+  [[72,'Stretch Target (3d) = 72h'],[120,'Target (5d) = 120h']].forEach(([hrs,label]) => {
+    if(hrs<=maxVal){
+      svg += '<line x1="'+padL+'" y1="'+yFor(hrs)+'" x2="'+(W-padR)+'" y2="'+yFor(hrs)+'" stroke="#B7BCC4" stroke-dasharray="4,4" stroke-width="1"/>';
+      svg += '<text x="'+(W-padR)+'" y="'+(yFor(hrs)-4)+'" font-size="10" fill="#9098A0" text-anchor="end">'+label+'</text>';
+    }
+  });
+  svg += '<line x1="'+padL+'" y1="'+(H-padB)+'" x2="'+(W-padR)+'" y2="'+(H-padB)+'" stroke="#DCDFE3" stroke-width="1"/>';
+  if(path) svg += '<path d="'+path.trim()+'" fill="none" stroke="#E2601D" stroke-width="2"/>';
+  values.forEach((v,i) => {
+    if(v!==null){
+      svg += '<circle cx="'+xFor(i+1)+'" cy="'+yFor(v)+'" r="4" fill="#E2601D" stroke="#fff" stroke-width="1.5"/>';
+      svg += '<text x="'+xFor(i+1)+'" y="'+(yFor(v)-8)+'" font-size="9" fill="#565C66" text-anchor="middle">'+v.toFixed(1)+'</text>';
+    }
+    svg += '<text x="'+xFor(i+1)+'" y="'+(H-padB+16)+'" font-size="10" fill="#9098A0" text-anchor="middle">'+(i+1)+'</text>';
+  });
+  svg += '</svg>';
+  chartEl.innerHTML = svg;
+
+  // ---- data table ----
+  const DAY_COL_PX = 44;
+  let colgroupHtml = '<colgroup><col style="width:220px">';
+  for(let d=1; d<=nDays; d++){ colgroupHtml += '<col style="width:'+DAY_COL_PX+'px">'; }
+  colgroupHtml += '</colgroup>';
+
+  let rowHead = '<tr><th style="min-width:220px;">Month / Day</th>';
+  for(let d=1; d<=nDays; d++){ rowHead += '<th style="text-align:center;">'+d+'</th>'; }
+  rowHead += '</tr>';
+
+  function dataRow(label, getter){
+    let row = '<tr><td style="font-weight:600;">'+label+'</td>';
+    for(let d=1; d<=nDays; d++){
+      const e = monthData[d];
+      const v = e ? getter(e) : null;
+      row += '<td style="text-align:center;">'+(v===null||v===undefined?'':v)+'</td>';
+    }
+    row += '</tr>';
+    return row;
+  }
+
+  tableEl.style.tableLayout = 'fixed';
+  tableEl.style.width = (220 + nDays*DAY_COL_PX) + 'px';
+  tableEl.innerHTML = colgroupHtml
+    + '<thead>'+rowHead+'</thead>'
+    + '<tbody>'
+    + dataRow("Number of Cargo's in backlog", e => e.cargoInBacklog)
+    + dataRow('From PQ report — number of CoA\'s in Backlog', e => e.pqBacklogCount)
+    + dataRow('From PQ report — Highest Day in CoA\'s Backlog', e => e.pqHighestDay)
+    + '</tbody>';
+}
+</script>
+</body>
+
+</html>
