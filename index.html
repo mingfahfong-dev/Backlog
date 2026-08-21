@@ -142,7 +142,7 @@
 <header>
   <div class="logo">BHP</div>
   <div>
-    <h1 id="pageTitle">COA Backlog Monitor <span style="font-weight:400;color:#B7BCC4;">v17</span></h1>
+    <h1 id="pageTitle">COA Backlog Monitor <span style="font-weight:400;color:#B7BCC4;">v19</span></h1>
     <p id="pageSubtitle">PMLB — upload a COA Status PDF export to view it interactively</p>
   </div>
   <div class="nav-tabs">
@@ -194,7 +194,7 @@
 <section id="pageTurnaround" class="hidden">
   <div class="panel">
     <h2>Add a day's data</h2>
-    <p style="font-size:12px;color:var(--ink-soft);margin:-4px 0 12px;">Upload that day's COA Status PDF (Summary Report) and the CoA Report Excel (.xlsm) together — the day is read from the PDF's report date. The Excel's <strong>Print</strong> tab is used for the backlog count and turnaround hours.</p>
+    <p style="font-size:12px;color:var(--ink-soft);margin:-4px 0 12px;">Upload a day's COA Status PDF and/or CoA Report Excel — each one saves its own fields for that day as soon as it's parsed; you don't need both.</p>
     <div style="display:flex; gap:16px; flex-wrap:wrap;">
       <div class="upload-zone" id="dropZonePdf3" style="flex:1; min-width:240px; padding:18px;">
         <p><strong>COA Status PDF</strong></p>
@@ -210,7 +210,6 @@
       </div>
     </div>
     <div id="statusMsg3" class="status-msg" style="margin-top:14px;"></div>
-    <button class="btn" id="addDayBtn" style="margin-top:10px;" disabled>Add / update this day</button>
   </div>
 
   <div class="panel">
@@ -218,20 +217,16 @@
       <h2 id="turnaroundMonthTitle" style="margin:0;">CoA Turnaround (hours)</h2>
       <select id="monthSelect" style="margin-left:auto; padding:6px 10px; border:1px solid var(--line); border-radius:6px; font-size:12px;"></select>
     </div>
-    <div id="turnaroundLineChart"></div>
-  </div>
-
-  <div class="panel">
-    <h2>Backlog detail by day</h2>
-    <div class="table-wrap" style="overflow-x:auto;">
-      <table class="data" id="turnaroundTable" style="table-layout:auto;"></table>
+    <div id="turnaroundScroll" style="overflow-x:auto;">
+      <div id="turnaroundLineChart"></div>
+      <table class="data" id="turnaroundTable" style="table-layout:fixed;"></table>
     </div>
     <button class="btn secondary" id="clearMonthBtn" style="margin-top:12px;">Clear stored data</button>
   </div>
 </section>
 
   <footer style="margin-top:32px; padding-top:14px; border-top:1px solid var(--line); font-size:11px; color:var(--ink-soft);">
-    COA Backlog Interactive Tool — v17
+    COA Backlog Interactive Tool — v19
   </footer>
 </main>
 
@@ -528,7 +523,7 @@ const NAV = [
 NAV.forEach(entry => {
   entry.btn.addEventListener('click', () => {
     NAV.forEach(e => { e.btn.classList.toggle('active', e===entry); e.page.classList.toggle('hidden', e!==entry); });
-    pageTitle.innerHTML = entry.title + ' <span style="font-weight:400;color:#B7BCC4;">v17</span>';
+    pageTitle.innerHTML = entry.title + ' <span style="font-weight:400;color:#B7BCC4;">v19</span>';
     pageSubtitle.textContent = entry.sub;
     if(entry.onShow) entry.onShow();
   });
@@ -537,8 +532,6 @@ NAV.forEach(entry => {
 // ---------- CoA Turnaround (page 3) ----------
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const STORE_KEY = 'coa_turnaround_data_v1';
-let pendingPdf3 = null;   // {monthKey, day, highestDay, countAtHighestDay}
-let pendingKpi3 = null;   // {lst, avgHours}
 
 function loadTurnaroundStore(){
   try{ return JSON.parse(localStorage.getItem(STORE_KEY) || '{}'); }
@@ -547,23 +540,24 @@ function loadTurnaroundStore(){
 function saveTurnaroundStore(store){
   localStorage.setItem(STORE_KEY, JSON.stringify(store));
 }
+function saveDayFields(year, monthIdx, day, fields){
+  const store = loadTurnaroundStore();
+  const monthKey = year + '-' + String(monthIdx+1).padStart(2,'0');
+  if(!store[monthKey]) store[monthKey] = {};
+  store[monthKey][day] = Object.assign({}, store[monthKey][day] || {}, fields);
+  saveTurnaroundStore(store);
+  return monthKey;
+}
 
 const fileInputPdf3 = document.getElementById('fileInputPdf3');
 const fileInputKpi3 = document.getElementById('fileInputKpi3');
 const fileNamePdf3 = document.getElementById('fileNamePdf3');
 const fileNameKpi3 = document.getElementById('fileNameKpi3');
 const statusMsg3 = document.getElementById('statusMsg3');
-const addDayBtn = document.getElementById('addDayBtn');
 
 function showStatus3(type, msg){
   statusMsg3.className = 'status-msg ' + type;
   statusMsg3.textContent = msg;
-}
-function maybeEnableAddDay(){
-  addDayBtn.disabled = !(pendingPdf3 && pendingKpi3);
-  if(pendingPdf3 && pendingKpi3){
-    showStatus3('ok', 'Both files parsed for ' + pendingPdf3.day + ' ' + MONTH_NAMES[pendingPdf3.monthIdx] + ' ' + pendingPdf3.year + '. Click "Add / update this day" to save.');
-  }
 }
 
 fileInputPdf3.addEventListener('change', e => { if(e.target.files[0]) parsePdf3(e.target.files[0]); });
@@ -571,7 +565,6 @@ fileInputKpi3.addEventListener('change', e => { if(e.target.files[0]) parseKpi3(
 
 async function parsePdf3(file){
   fileNamePdf3.textContent = 'Parsing ' + file.name + '...';
-  pendingPdf3 = null;
   try{
     const buf = await file.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({data: buf}).promise;
@@ -608,9 +601,11 @@ async function parsePdf3(file){
       return;
     }
     const top = kept.reduce((a,b) => b.d > a.d ? b : a);
-    pendingPdf3 = {monthIdx, day, year, highestDay: top.d, countAtHighestDay: top.c};
+    const monthKey = saveDayFields(year, monthIdx, day, {pqBacklogCount: top.c, pqHighestDay: top.d});
     fileNamePdf3.textContent = 'Loaded: ' + file.name;
-    maybeEnableAddDay();
+    showStatus3('ok', 'Saved PQ backlog data for ' + day + ' ' + MONTH_NAMES[monthIdx] + ' ' + year + '.');
+    populateMonthSelect(monthKey);
+    renderTurnaroundPage();
   } catch(err){
     showStatus3('error', 'Could not parse this PDF: ' + err.message);
     fileNamePdf3.textContent = '';
@@ -619,7 +614,6 @@ async function parsePdf3(file){
 
 async function parseKpi3(file){
   fileNameKpi3.textContent = 'Parsing ' + file.name + '...';
-  pendingKpi3 = null;
   try{
     const buf = await file.arrayBuffer();
     const wb = XLSX.read(buf, {type:'array', cellDates:false});
@@ -637,15 +631,23 @@ async function parseKpi3(file){
       return;
     }
 
+    const b1 = rows[0] && rows[0][1];
+    const excelDateStr = b1 ? b1.toString().trim() : '';
+    const dm = excelDateStr.match(/(\d{1,2})\/(\d{2})\/(\d{2})/);
+    if(!dm){
+      showStatus3('error', 'Could not read the report date from cell B1 of the Print tab (expected e.g. "Tuesday 28/07/26").');
+      fileNameKpi3.textContent = '';
+      return;
+    }
+    const day = parseInt(dm[1],10);
+    const monthIdx = parseInt(dm[2],10) - 1;
+    const year = 2000 + parseInt(dm[3],10);
+
     const SECTION_NAMES = ['Cargo Loading','Cargo Finished','Lab Started','Lab Finished'];
     let currentSection = null;
     let coaIdx = -1;
     const sectionCounts = {};
     const labFinishedCoaVals = [];
-    let excelDateStr = null;
-
-    const b1 = rows[0] && rows[0][1];
-    if(b1) excelDateStr = b1.toString().trim();
 
     for(let i=1;i<rows.length;i++){
       const r = rows[i];
@@ -681,35 +683,16 @@ async function parseKpi3(file){
 
     const cargoInBacklog = sectionCounts['Lab Started'] + sectionCounts['Lab Finished'];
     const avgHours = labFinishedCoaVals.length ? labFinishedCoaVals.reduce((a,b)=>a+b,0)/labFinishedCoaVals.length : null;
-    pendingKpi3 = {lst: cargoInBacklog, avgHours, excelDateStr};
+    const monthKey = saveDayFields(year, monthIdx, day, {cargoInBacklog, turnaroundHours: avgHours});
     fileNameKpi3.textContent = 'Loaded: ' + file.name;
-    maybeEnableAddDay();
+    showStatus3('ok', 'Saved backlog count and turnaround for ' + day + ' ' + MONTH_NAMES[monthIdx] + ' ' + year + '.');
+    populateMonthSelect(monthKey);
+    renderTurnaroundPage();
   } catch(err){
     showStatus3('error', 'Could not parse this Excel file: ' + err.message);
     fileNameKpi3.textContent = '';
   }
 }
-
-addDayBtn.addEventListener('click', () => {
-  if(!pendingPdf3 || !pendingKpi3) return;
-  const store = loadTurnaroundStore();
-  const monthKey = pendingPdf3.year + '-' + String(pendingPdf3.monthIdx+1).padStart(2,'0');
-  if(!store[monthKey]) store[monthKey] = {};
-  store[monthKey][pendingPdf3.day] = {
-    cargoInBacklog: pendingKpi3.lst,
-    pqBacklogCount: pendingPdf3.countAtHighestDay,
-    pqHighestDay: pendingPdf3.highestDay,
-    turnaroundHours: pendingKpi3.avgHours
-  };
-  saveTurnaroundStore(store);
-  showStatus3('ok', 'Saved ' + pendingPdf3.day + ' ' + MONTH_NAMES[pendingPdf3.monthIdx] + ' ' + pendingPdf3.year + '.');
-  pendingPdf3 = null; pendingKpi3 = null;
-  fileInputPdf3.value = ''; fileInputKpi3.value = '';
-  fileNamePdf3.textContent = ''; fileNameKpi3.textContent = '';
-  addDayBtn.disabled = true;
-  populateMonthSelect(monthKey);
-  renderTurnaroundPage();
-});
 
 document.getElementById('clearMonthBtn').addEventListener('click', () => {
   const sel = document.getElementById('monthSelect').value;
@@ -748,7 +731,7 @@ function renderTurnaroundPage(){
 
   if(!monthKey){
     titleEl.textContent = 'CoA Turnaround (hours)';
-    chartEl.innerHTML = '<p style="font-size:12px;color:var(--ink-soft)">No days added yet — upload a PDF + CoA Report Excel pair above.</p>';
+    chartEl.innerHTML = '<p style="font-size:12px;color:var(--ink-soft)">No days added yet — upload a PDF and/or CoA Report Excel above.</p>';
     tableEl.innerHTML = '';
     return;
   }
@@ -758,8 +741,14 @@ function renderTurnaroundPage(){
   titleEl.textContent = 'CoA Turnaround (hours) — ' + MONTH_NAMES[m-1] + ' ' + y;
   const nDays = daysInMonth(monthKey);
 
+  // Shared geometry — chart and table below use the exact same label width and
+  // per-day column width, so each day's dot sits directly above its table column.
+  const LABEL_W = 130, DAY_W = 26, padR = 20;
+  const totalW = LABEL_W + nDays*DAY_W + padR;
+  const dayCenterX = d => LABEL_W + (d-1)*DAY_W + DAY_W/2;
+
   // ---- SVG line chart ----
-  const W = Math.max(700, nDays*32), H = 260, padL = 40, padR = 20, padT = 14, padB = 30;
+  const H = 240, padT = 14, padB = 26;
   const values = [];
   for(let d=1; d<=nDays; d++){
     const e = monthData[d];
@@ -767,61 +756,57 @@ function renderTurnaroundPage(){
   }
   const present = values.filter(v => v!==null);
   const maxVal = Math.max(120, ...present, 10);
-  const xFor = d => padL + ((d-1)/(nDays-1)) * (W-padL-padR);
   const yFor = v => H-padB - (v/maxVal) * (H-padT-padB);
 
   let path = '';
-  values.forEach((v,i) => { if(v!==null){ const cmd = path?'L':'M'; path += cmd+xFor(i+1)+','+yFor(v)+' '; } });
+  values.forEach((v,i) => { if(v!==null){ const cmd = path?'L':'M'; path += cmd+dayCenterX(i+1)+','+yFor(v)+' '; } });
 
-  let svg = '<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:260px;">';
-  // reference lines: 3-day stretch target (72h) and 5-day target (120h)
+  let svg = '<svg viewBox="0 0 '+totalW+' '+H+'" style="width:'+totalW+'px;height:'+H+'px;display:block;">';
   [[72,'Stretch Target (3d) = 72h'],[120,'Target (5d) = 120h']].forEach(([hrs,label]) => {
     if(hrs<=maxVal){
-      svg += '<line x1="'+padL+'" y1="'+yFor(hrs)+'" x2="'+(W-padR)+'" y2="'+yFor(hrs)+'" stroke="#B7BCC4" stroke-dasharray="4,4" stroke-width="1"/>';
-      svg += '<text x="'+(W-padR)+'" y="'+(yFor(hrs)-4)+'" font-size="10" fill="#9098A0" text-anchor="end">'+label+'</text>';
+      svg += '<line x1="'+LABEL_W+'" y1="'+yFor(hrs)+'" x2="'+(totalW-padR)+'" y2="'+yFor(hrs)+'" stroke="#B7BCC4" stroke-dasharray="4,4" stroke-width="1"/>';
+      svg += '<text x="'+(totalW-padR)+'" y="'+(yFor(hrs)-4)+'" font-size="9" fill="#9098A0" text-anchor="end">'+label+'</text>';
     }
   });
-  svg += '<line x1="'+padL+'" y1="'+(H-padB)+'" x2="'+(W-padR)+'" y2="'+(H-padB)+'" stroke="#DCDFE3" stroke-width="1"/>';
+  svg += '<line x1="'+LABEL_W+'" y1="'+(H-padB)+'" x2="'+(totalW-padR)+'" y2="'+(H-padB)+'" stroke="#DCDFE3" stroke-width="1"/>';
   if(path) svg += '<path d="'+path.trim()+'" fill="none" stroke="#E2601D" stroke-width="2"/>';
   values.forEach((v,i) => {
     if(v!==null){
-      svg += '<circle cx="'+xFor(i+1)+'" cy="'+yFor(v)+'" r="4" fill="#E2601D" stroke="#fff" stroke-width="1.5"/>';
-      svg += '<text x="'+xFor(i+1)+'" y="'+(yFor(v)-8)+'" font-size="9" fill="#565C66" text-anchor="middle">'+v.toFixed(1)+'</text>';
+      svg += '<circle cx="'+dayCenterX(i+1)+'" cy="'+yFor(v)+'" r="3.5" fill="#E2601D" stroke="#fff" stroke-width="1.5"/>';
+      svg += '<text x="'+dayCenterX(i+1)+'" y="'+(yFor(v)-7)+'" font-size="8" fill="#565C66" text-anchor="middle">'+v.toFixed(1)+'</text>';
     }
-    svg += '<text x="'+xFor(i+1)+'" y="'+(H-padB+16)+'" font-size="10" fill="#9098A0" text-anchor="middle">'+(i+1)+'</text>';
   });
+  svg += '<text x="4" y="'+(padT+4)+'" font-size="9" fill="#9098A0">CoA Turnaround Stretch Target</text>';
   svg += '</svg>';
   chartEl.innerHTML = svg;
 
-  // ---- data table ----
-  const DAY_COL_PX = 44;
-  let colgroupHtml = '<colgroup><col style="width:220px">';
-  for(let d=1; d<=nDays; d++){ colgroupHtml += '<col style="width:'+DAY_COL_PX+'px">'; }
-  colgroupHtml += '</colgroup>';
+  // ---- data table: original format — days as columns, aligned under the chart ----
+  let colgroupHtml = '<colgroup><col style="width:'+LABEL_W+'px">';
+  for(let d=1; d<=nDays; d++){ colgroupHtml += '<col style="width:'+DAY_W+'px">'; }
+  colgroupHtml += '<col style="width:'+padR+'px"></colgroup>';
 
-  let rowHead = '<tr><th style="min-width:220px;">Month / Day</th>';
-  for(let d=1; d<=nDays; d++){ rowHead += '<th style="text-align:center;">'+d+'</th>'; }
-  rowHead += '</tr>';
+  let rowHead = '<tr><th style="font-size:10px;">Month / Day</th>';
+  for(let d=1; d<=nDays; d++){ rowHead += '<th style="text-align:center;font-size:9px;padding:6px 2px;">'+d+'</th>'; }
+  rowHead += '<th></th></tr>';
 
   function dataRow(label, getter){
-    let row = '<tr><td style="font-weight:600;">'+label+'</td>';
+    let row = '<tr><td style="font-weight:600;font-size:10px;">'+label+'</td>';
     for(let d=1; d<=nDays; d++){
       const e = monthData[d];
       const v = e ? getter(e) : null;
-      row += '<td style="text-align:center;">'+(v===null||v===undefined?'':v)+'</td>';
+      row += '<td style="text-align:center;font-size:10px;padding:6px 2px;">'+(v===null||v===undefined?'':v)+'</td>';
     }
-    row += '</tr>';
+    row += '<td></td></tr>';
     return row;
   }
 
-  tableEl.style.tableLayout = 'fixed';
-  tableEl.style.width = (220 + nDays*DAY_COL_PX) + 'px';
+  tableEl.style.width = totalW + 'px';
   tableEl.innerHTML = colgroupHtml
     + '<thead>'+rowHead+'</thead>'
     + '<tbody>'
     + dataRow("Number of Cargo's in backlog", e => e.cargoInBacklog)
-    + dataRow('From PQ report — number of CoA\'s in Backlog', e => e.pqBacklogCount)
-    + dataRow('From PQ report — Highest Day in CoA\'s Backlog', e => e.pqHighestDay)
+    + dataRow('From PQ report — CoA\'s in Backlog', e => e.pqBacklogCount)
+    + dataRow('From PQ report — Highest Day in Backlog', e => e.pqHighestDay)
     + '</tbody>';
 }
 </script>
