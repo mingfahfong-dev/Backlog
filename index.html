@@ -81,13 +81,14 @@
 
   table.data{width:100%; table-layout:fixed; border-collapse:collapse; font-size:11.5px; background:var(--card);}
   table.data th{
-    background:#F0F1F2; text-align:left; padding:8px 8px; font-weight:600; color:var(--ink-soft);
-    cursor:pointer; user-select:none; border-bottom:1px solid var(--line); white-space:normal; word-break:break-word;
+    background:#F0F1F2; text-align:left; padding:8px 6px; font-weight:600; color:var(--ink-soft);
+    cursor:pointer; user-select:none; border-bottom:1px solid var(--line); white-space:nowrap;
+    overflow:hidden; text-overflow:ellipsis; font-size:11px;
   }
   table.data th:hover{color:var(--ink);}
   table.data th.sorted::after{content:" \25BE"; color:var(--bhp-orange);}
   table.data th.sorted.asc::after{content:" \25B4";}
-  table.data td{padding:7px 8px; border-bottom:1px solid var(--line); font-family:var(--mono); white-space:normal; word-break:break-word;}
+  table.data td{padding:7px 8px; border-bottom:1px solid var(--line); font-family:var(--mono); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
   table.data td.customer, table.data td.vessel{font-family:inherit;}
   table.data tbody tr.overdue{background:var(--overdue-bg); border-left:3px solid var(--overdue-line);}
   table.data tbody tr.port{background:var(--port-bg); border-left:3px solid var(--port-line);}
@@ -113,8 +114,12 @@
     box-shadow:0 0 0 1px rgba(200,30,30,0.25) inset;
     pointer-events:none; z-index:3;
   }
-  .table-wrap{overflow-x:hidden; border:1px solid var(--line); border-radius:10px;}
+  .table-wrap{overflow-x:auto; border:1px solid var(--line); border-radius:10px;}
   .table-wrap table{border-radius:10px; overflow:hidden;}
+  .lvl3-badge{
+    background:var(--bhp-orange); color:#fff; font-size:9px; font-weight:700; letter-spacing:0.5px;
+    padding:2px 6px; border-radius:4px; white-space:nowrap;
+  }
 
   .row-count{font-size:12px; color:var(--ink-soft); margin-bottom:8px;}
   details.debug{margin-top:24px; font-size:12px; color:var(--ink-soft);}
@@ -139,6 +144,32 @@
   .bar-chart .bar.zero{background:#E5E7E9;}
   .bar-labels{display:flex; gap:6px; padding:6px 4px 0;}
   .bar-labels .bar-lbl{flex:1; text-align:center; font-size:11px; color:var(--ink-soft);}
+  #printArea{display:none;}
+
+  @media print{
+    @page{ size: landscape; margin: 10mm; }
+    body > *:not(#printArea){display:none !important;}
+    #printArea{
+      display:block;
+      font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; color:#111;
+    }
+    .print-title{font-size:16px; font-weight:800; margin:0 0 2px;}
+    .print-sub{font-size:10px; color:#555; margin:0 0 14px;}
+    .print-section{margin-bottom:22px;}
+    .print-section h3{
+      font-size:12px; font-weight:800; margin:0 0 6px; padding:5px 10px;
+      background:#1B1E23; color:#fff; display:inline-block; border-radius:3px;
+    }
+    .print-section.notready h3{background:#C81E1E;}
+    .print-table{width:100%; border-collapse:collapse; font-size:9px;}
+    .print-table th{
+      background:#F0F1F2; color:#1B1E23; text-align:left; padding:4px 5px; font-weight:700;
+      border:1px solid #DCDFE3;
+    }
+    .print-table td{padding:3px 5px; border:1px solid #DCDFE3; white-space:nowrap;}
+    .print-section .print-table tbody tr:nth-child(even){background:#F7F8F9;}
+    .print-empty{font-size:10px; color:#777; font-style:italic; margin:4px 0 0;}
+  }
 </style>
 </head>
 <body>
@@ -146,7 +177,7 @@
 <header>
   <div class="logo">BHP</div>
   <div>
-    <h1 id="pageTitle">COA Backlog Monitor <span style="font-weight:400;color:#B7BCC4;">v20</span></h1>
+    <h1 id="pageTitle">COA Backlog Monitor <span style="font-weight:400;color:#B7BCC4;">v26</span></h1>
     <p id="pageSubtitle">PMLB — upload a COA Status PDF export to view it interactively</p>
   </div>
   <div class="nav-tabs">
@@ -177,6 +208,8 @@
       <div class="toolbar">
         <input type="search" id="searchBox" placeholder="Search customer or vessel...">
         <button class="btn secondary" id="toggleNotReady">Hide COA Not Ready</button>
+        <button class="btn secondary" id="clearRowDataBtn">Clear data</button>
+        <button class="btn" id="printReportBtn">Print report</button>
       </div>
       <div class="row-count" id="rowCount"></div>
       <div class="table-wrap">
@@ -194,6 +227,7 @@
     </details>
   </div>
 </section>
+
 
 <section id="pageTurnaround" class="hidden">
   <div class="panel">
@@ -230,22 +264,42 @@
 </section>
 
   <footer style="margin-top:32px; padding-top:14px; border-top:1px solid var(--line); font-size:11px; color:var(--ink-soft);">
-    COA Backlog Interactive Tool — v20
-  </footer>
-</main>
+    COA Backlog Interactive Tool — v26
+  </footer></main>
+
+<div id="printArea"></div>
 
 <script>
 pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
-const COLS = ["COA Status","Backlog Days","Berth","Inspection Lot","Nomination Number","Cclas Code","Customer Name","Vessel Name","Actual Time Arrived","Official Start Time","Official Finish Time","Reconciled WMT","Consig Code","COA Auth Lvl"];
+const COLS = ["COA Status","Days","Berth","Inspection Lot","Nomination Number","Product","Customer Name","Vessel Name","Actual Time Arrived","OST","OFT","WMT","CCLAS","Lvl 3"];
 const REF_WIDTH = 1189.44;
 const BOUND_X0 = [21.4986,69.488,117.568,168.56,233.36,284.352,332.432,496.224,595.824,646.816,724.416,795.216,930.416,978.496];
 const TABLE_END = 1040.805;
 const MAX_BACKLOG_DAYS = 50;
 
 let allRows = [];
-let processedIds = new Set();
 let sortState = {col: 1, asc: false};
+
+const ROW_STATE_KEY = 'coa_backlog_row_state_v1';
+function rowKey(r){
+  return [r.poNo, r.inspectionLot, r.vessel, r.consig, r.backlogDays].join('|');
+}
+function loadRowState(){
+  try{ return JSON.parse(localStorage.getItem(ROW_STATE_KEY) || '{}'); }
+  catch(e){ return {}; }
+}
+function saveRowState(store){
+  localStorage.setItem(ROW_STATE_KEY, JSON.stringify(store));
+}
+function clearRowState(){
+  localStorage.removeItem(ROW_STATE_KEY);
+}
+function setRowFlag(key, flag, value){
+  const store = loadRowState();
+  store[key] = Object.assign({}, store[key] || {}, {[flag]: value});
+  saveRowState(store);
+}
 
 const fileInput = document.getElementById('fileInput');
 const dropZone = document.getElementById('dropZone');
@@ -311,9 +365,11 @@ async function handleFile(file){
     }
 
     allRows = detailRows.filter(r => r.backlogDays <= MAX_BACKLOG_DAYS);
-    allRows.forEach((r,i) => r.id = 'r' + i);
-    processedIds = new Set();
+    allRows.forEach(r => r.id = rowKey(r));
+    clearRowState();
     fileNameEl.textContent = 'Loaded: ' + file.name;
+
+    saveSession(file.name, allRows, summaryText, debugDump);
 
     renderSummary(summaryText);
     renderTableHead();
@@ -324,6 +380,35 @@ async function handleFile(file){
     showStatus('error', 'Could not parse this PDF: ' + err.message + '. The file may be a scanned image rather than text, or in an unexpected format.');
     fileNameEl.textContent = '';
   }
+}
+
+const SESSION_KEY = 'coa_backlog_session_v1';
+function saveSession(fileName, rows, summaryText, debugDump){
+  try{
+    localStorage.setItem(SESSION_KEY, JSON.stringify({fileName, rows, summaryText, debugDump, savedAt: Date.now()}));
+  } catch(e){ /* storage full or unavailable — session just won't restore, non-fatal */ }
+}
+function loadSession(){
+  try{ return JSON.parse(localStorage.getItem(SESSION_KEY) || 'null'); }
+  catch(e){ return null; }
+}
+function clearSession(){
+  localStorage.removeItem(SESSION_KEY);
+}
+
+function restoreSession(){
+  const session = loadSession();
+  if(!session || !session.rows || session.rows.length === 0) return false;
+  allRows = session.rows;
+  debugText.textContent = session.debugDump || '';
+  fileNameEl.textContent = 'Restored: ' + (session.fileName || 'previous session');
+  const when = session.savedAt ? new Date(session.savedAt).toLocaleString() : 'earlier';
+  showStatus('ok', 'Restored your previous session (' + allRows.length + ' rows) from ' + when + '. Upload a new PDF to replace it.');
+  renderSummary(session.summaryText || '');
+  renderTableHead();
+  applyFiltersAndRender();
+  content.classList.remove('hidden');
+  return true;
 }
 
 function extractDetailRows(items, pageWidth){
@@ -427,13 +512,15 @@ function card(label, value, sub){
 }
 
 const HIDDEN_COLS = [0,4,8];
-const COL_WIDTHS = {1:'7%',2:'5%',3:'9%',5:'6%',6:'20%',7:'14%',9:'9%',10:'12%',11:'8%',12:'6%',13:'4%'};
+const COL_WIDTHS = {1:'6%',2:'4%',3:'8%',5:'5%',6:'17%',7:'12%',9:'8%',10:'11%',11:'7%',12:'5%',13:'6%'};
+const EXTRA_COLS_HTML = '<col style="width:8%">';
 function renderTableHead(){
   const headRow = document.getElementById('headRow');
   const colgroup = document.getElementById('colGroup');
-  colgroup.innerHTML = COLS.map((c,i) => HIDDEN_COLS.includes(i) ? '' : '<col style="width:'+(COL_WIDTHS[i]||'8%')+'">').join('');
-  headRow.innerHTML = COLS.map((c,i) => HIDDEN_COLS.includes(i) ? '' : '<th data-idx="'+i+'">'+c+'</th>').join('');
-  headRow.querySelectorAll('th').forEach(th => {
+  colgroup.innerHTML = COLS.map((c,i) => HIDDEN_COLS.includes(i) ? '' : '<col style="width:'+(COL_WIDTHS[i]||'8%')+'">').join('') + EXTRA_COLS_HTML;
+  headRow.innerHTML = COLS.map((c,i) => HIDDEN_COLS.includes(i) ? '' : '<th data-idx="'+i+'">'+c+'</th>').join('')
+    + '<th style="width:70px;text-align:center;">Waiting Lump</th>';
+  headRow.querySelectorAll('th[data-idx]').forEach(th => {
     th.addEventListener('click', () => {
       const idx = parseInt(th.dataset.idx,10);
       if(sortState.col === idx) sortState.asc = !sortState.asc;
@@ -467,11 +554,20 @@ function applyFiltersAndRender(){
   const activeTh = document.querySelector('#headRow th[data-idx="'+sortState.col+'"]');
   if(activeTh){ activeTh.classList.add('sorted'); if(sortState.asc) activeTh.classList.add('asc'); }
 
+  const rowState = loadRowState();
   const body = document.getElementById('bodyRows');
   body.innerHTML = rows.map(r => {
     const overdue = r.backlogDays > 3;
     const port = /port hedland/i.test(r.customer);
-    const processed = processedIds.has(r.id);
+    const state = rowState[r.id] || {};
+    const processed = !!state.processed;
+    const rawAuthLvl = (r.authLvl||'').trim();
+    let lvl3Cell;
+    if(rawAuthLvl){
+      lvl3Cell = /3/.test(rawAuthLvl) ? '<span class="lvl3-badge">LVL 3</span>' : esc(rawAuthLvl);
+    } else {
+      lvl3Cell = '<input type="checkbox" class="lvl3-check" '+(state.lvl3?'checked':'')+'>';
+    }
     const cls = (overdue?'overdue ':'') + (port?'port ':'') + (processed?'processed':'');
     return '<tr class="'+cls.trim()+'" data-id="'+r.id+'">'
       + '<td>'+r.backlogDays+'</td>'
@@ -484,7 +580,8 @@ function applyFiltersAndRender(){
       + '<td>'+esc(r.officialFinish)+'</td>'
       + '<td>'+esc(r.wmt)+'</td>'
       + '<td>'+esc(r.consig)+'</td>'
-      + '<td>'+esc(r.authLvl)+'</td>'
+      + '<td style="text-align:center;" class="no-strike">'+lvl3Cell+'</td>'
+      + '<td style="text-align:center;" class="no-strike"><input type="checkbox" class="lump-check" '+(state.waitingLump?'checked':'')+'></td>'
       + '</tr>';
   }).join('');
 
@@ -499,17 +596,89 @@ function esc(s){
 document.getElementById('searchBox').addEventListener('input', applyFiltersAndRender);
 
 document.getElementById('bodyRows').addEventListener('click', (e) => {
+  if(e.target.closest('.no-strike')) return;
   const tr = e.target.closest('tr');
   if(!tr) return;
   const id = tr.dataset.id;
-  if(processedIds.has(id)){ processedIds.delete(id); tr.classList.remove('processed'); }
-  else { processedIds.add(id); tr.classList.add('processed'); }
+  const store = loadRowState();
+  const nowProcessed = !(store[id] && store[id].processed);
+  setRowFlag(id, 'processed', nowProcessed);
+  tr.classList.toggle('processed', nowProcessed);
+});
+
+document.getElementById('bodyRows').addEventListener('change', (e) => {
+  const tr = e.target.closest('tr');
+  if(!tr) return;
+  const id = tr.dataset.id;
+  if(e.target.classList.contains('lvl3-check')){
+    setRowFlag(id, 'lvl3', e.target.checked);
+  } else if(e.target.classList.contains('lump-check')){
+    setRowFlag(id, 'waitingLump', e.target.checked);
+  }
 });
 
 document.getElementById('toggleNotReady').addEventListener('click', (e) => {
   hideNotReady = !hideNotReady;
   e.target.textContent = hideNotReady ? 'Show COA Not Ready' : 'Hide COA Not Ready';
   applyFiltersAndRender();
+});
+
+document.getElementById('clearRowDataBtn').addEventListener('click', () => {
+  if(!confirm('Clear all saved row marks (processed, Lvl 3, Waiting Lump) for this data?')) return;
+  clearRowState();
+  applyFiltersAndRender();
+});
+
+document.getElementById('printReportBtn').addEventListener('click', () => {
+  const rowState = loadRowState();
+  const done = [];
+  const notReady = [];
+  allRows.forEach(r => {
+    const state = rowState[r.id] || {};
+    (state.processed ? done : notReady).push(r);
+  });
+  // within each group, keep the same default sort as the on-screen table (backlog days, descending)
+  const byBacklogDesc = (a,b) => b.backlogDays - a.backlogDays;
+  done.sort(byBacklogDesc);
+  notReady.sort(byBacklogDesc);
+
+  const printRow = (r) => {
+    const state = rowState[r.id] || {};
+    const rawAuthLvl = (r.authLvl||'').trim();
+    const isLvl3 = /3/.test(rawAuthLvl) || !!state.lvl3;
+    return '<tr>'
+      + '<td>'+r.backlogDays+'</td>'
+      + '<td>'+esc(r.berth)+'</td>'
+      + '<td>'+esc(r.cclasCode)+'</td>'
+      + '<td>'+esc(r.customer)+'</td>'
+      + '<td>'+esc(r.vessel)+'</td>'
+      + '<td>'+esc(r.officialStart)+'</td>'
+      + '<td>'+esc(r.officialFinish)+'</td>'
+      + '<td>'+esc(r.wmt)+'</td>'
+      + '<td>'+esc(r.consig)+'</td>'
+      + '<td>'+(isLvl3 ? 'LVL 3' : '')+'</td>'
+      + '<td>'+(state.waitingLump ? 'WAITING' : '')+'</td>'
+      + '</tr>';
+  };
+
+  const headerRow = '<tr><th>Days</th><th>Berth</th><th>Product</th><th>Customer</th>'
+    + '<th>Vessel</th><th>OST</th><th>OFT</th><th>WMT</th><th>CCLAS</th><th>Lvl 3</th><th>Waiting Lump</th></tr>';
+
+  const section = (title, rows, cls) => {
+    const table = rows.length
+      ? '<table class="print-table"><thead>'+headerRow+'</thead><tbody>'+rows.map(printRow).join('')+'</tbody></table>'
+      : '<p class="print-empty">None</p>';
+    return '<div class="print-section '+cls+'"><h3>'+title+' — '+rows.length+'</h3>'+table+'</div>';
+  };
+
+  const now = new Date().toLocaleString();
+  document.getElementById('printArea').innerHTML =
+    '<div class="print-title">COA Backlog — Authorisation Status</div>'
+    + '<div class="print-sub">Generated ' + now + ' — Total rows: ' + allRows.length + '</div>'
+    + section('AUTHORISED (DONE)', done, 'done')
+    + section('NOT READY', notReady, 'notready');
+
+  window.print();
 });
 
 // ---------- Page navigation ----------
@@ -527,7 +696,7 @@ const NAV = [
 NAV.forEach(entry => {
   entry.btn.addEventListener('click', () => {
     NAV.forEach(e => { e.btn.classList.toggle('active', e===entry); e.page.classList.toggle('hidden', e!==entry); });
-    pageTitle.innerHTML = entry.title + ' <span style="font-weight:400;color:#B7BCC4;">v20</span>';
+    pageTitle.innerHTML = entry.title + ' <span style="font-weight:400;color:#B7BCC4;">v26</span>';
     pageSubtitle.textContent = entry.sub;
     if(entry.onShow) entry.onShow();
   });
@@ -813,6 +982,9 @@ function renderTurnaroundPage(){
     + dataRow('From PQ report — Highest Day in Backlog', e => e.pqHighestDay)
     + '</tbody>';
 }
+
+// ---------- Restore saved session on page load ----------
+restoreSession();
 </script>
 </body>
 
