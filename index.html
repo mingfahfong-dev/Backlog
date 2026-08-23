@@ -177,7 +177,7 @@
 <header>
   <div class="logo">BHP</div>
   <div>
-    <h1 id="pageTitle">COA Backlog Monitor <span style="font-weight:400;color:#B7BCC4;">v26</span></h1>
+    <h1 id="pageTitle">COA Backlog Monitor <span style="font-weight:400;color:#B7BCC4;">v27</span></h1>
     <p id="pageSubtitle">PMLB — upload a COA Status PDF export to view it interactively</p>
   </div>
   <div class="nav-tabs">
@@ -232,7 +232,7 @@
 <section id="pageTurnaround" class="hidden">
   <div class="panel">
     <h2>Add a day's data</h2>
-    <p style="font-size:12px;color:var(--ink-soft);margin:-4px 0 12px;">Upload a day's COA Status PDF and/or CoA Report Excel — each one saves its own fields for that day as soon as it's parsed; you don't need both.</p>
+    <p style="font-size:12px;color:var(--ink-soft);margin:-4px 0 12px;">The PDF fills in that single day's PQ backlog figures. The CoA Report Excel's <strong>L2</strong> tab has one row per day, so uploading it bulk-fills backlog count and turnaround for every day it contains — you don't need to upload it once per day.</p>
     <div style="display:flex; gap:16px; flex-wrap:wrap;">
       <div class="upload-zone" id="dropZonePdf3" style="flex:1; min-width:240px; padding:18px;">
         <p><strong>COA Status PDF</strong></p>
@@ -241,7 +241,7 @@
         <div class="filename" id="fileNamePdf3"></div>
       </div>
       <div class="upload-zone" id="dropZoneKpi3" style="flex:1; min-width:240px; padding:18px;">
-        <p><strong>CoA Report Excel (.xlsm, Print tab)</strong></p>
+        <p><strong>CoA Report Excel (.xlsm, L2 tab)</strong></p>
         <label class="btn" for="fileInputKpi3">Choose Excel file</label>
         <input type="file" id="fileInputKpi3" accept=".xlsm,.xlsx,.xls">
         <div class="filename" id="fileNameKpi3"></div>
@@ -264,7 +264,7 @@
 </section>
 
   <footer style="margin-top:32px; padding-top:14px; border-top:1px solid var(--line); font-size:11px; color:var(--ink-soft);">
-    COA Backlog Interactive Tool — v26
+    COA Backlog Interactive Tool — v27
   </footer></main>
 
 <div id="printArea"></div>
@@ -691,12 +691,12 @@ const pageSubtitle = document.getElementById('pageSubtitle');
 
 const NAV = [
   {btn: navBacklog, page: pageBacklog, title: 'COA Backlog Monitor', sub: 'PMLB — upload a COA Status PDF export to view it interactively'},
-  {btn: navTurnaround, page: pageTurnaround, title: 'CoA Turnaround (hours)', sub: 'PMLB — upload a day\'s PDF + CoA Report Excel (Print tab) to plot that day', onShow: renderTurnaroundPage}
+  {btn: navTurnaround, page: pageTurnaround, title: 'CoA Turnaround (hours)', sub: 'PMLB — upload a PDF for that day\'s PQ figures, and the CoA Report Excel (L2 tab) to bulk-fill the whole month', onShow: renderTurnaroundPage}
 ];
 NAV.forEach(entry => {
   entry.btn.addEventListener('click', () => {
     NAV.forEach(e => { e.btn.classList.toggle('active', e===entry); e.page.classList.toggle('hidden', e!==entry); });
-    pageTitle.innerHTML = entry.title + ' <span style="font-weight:400;color:#B7BCC4;">v26</span>';
+    pageTitle.innerHTML = entry.title + ' <span style="font-weight:400;color:#B7BCC4;">v27</span>';
     pageSubtitle.textContent = entry.sub;
     if(entry.onShow) entry.onShow();
   });
@@ -790,76 +790,63 @@ async function parseKpi3(file){
   try{
     const buf = await file.arrayBuffer();
     const wb = XLSX.read(buf, {type:'array', cellDates:false});
-    const sheetName = wb.SheetNames.find(n => /^print$/i.test(n)) || wb.SheetNames.find(n => /print/i.test(n));
+    const sheetName = wb.SheetNames.find(n => /^l2$/i.test(n)) || wb.SheetNames.find(n => /l2/i.test(n));
     if(!sheetName){
-      showStatus3('error', 'Could not find a "Print" tab in this Excel file — expected the CoA_Report.xlsm layout.');
+      showStatus3('error', 'Could not find an "L2" tab in this Excel file — expected the CoA_Report.xlsm layout.');
       fileNameKpi3.textContent = '';
       return;
     }
     const sheet = wb.Sheets[sheetName];
     const rows = XLSX.utils.sheet_to_json(sheet, {header:1, raw:true, defval:null});
     if(!rows || rows.length < 2){
-      showStatus3('error', 'Could not find data rows in the Print tab.');
+      showStatus3('error', 'Could not find data rows in the L2 tab.');
       fileNameKpi3.textContent = '';
       return;
     }
 
-    const b1 = rows[0] && rows[0][1];
-    const excelDateStr = b1 ? b1.toString().trim() : '';
-    const dm = excelDateStr.match(/(\d{1,2})\/(\d{2})\/(\d{2})/);
-    if(!dm){
-      showStatus3('error', 'Could not read the report date from cell B1 of the Print tab (expected e.g. "Tuesday 28/07/26").');
+    const header = rows[0].map(h => (h||'').toString().trim().toLowerCase());
+    const dateIdx = header.findIndex(h => h==='date');
+    const labStartedIdx = header.findIndex(h => h.includes('lab started'));
+    const labFinishedIdx = header.findIndex(h => h.includes('lab finished'));
+    const avgFinishIdx = header.findIndex(h => h.includes('average finish'));
+
+    if(dateIdx===-1 || labStartedIdx===-1 || labFinishedIdx===-1 || avgFinishIdx===-1){
+      showStatus3('error', 'Could not find the expected columns (Date, #Lab Started, #Lab Finished, Average finish time) in the L2 tab.');
       fileNameKpi3.textContent = '';
       return;
     }
-    const day = parseInt(dm[1],10);
-    const monthIdx = parseInt(dm[2],10) - 1;
-    const year = 2000 + parseInt(dm[3],10);
 
-    const SECTION_NAMES = ['Cargo Loading','Cargo Finished','Lab Started','Lab Finished'];
-    let currentSection = null;
-    let coaIdx = -1;
-    const sectionCounts = {};
-    const labFinishedCoaVals = [];
-
+    let lastMonthKey = null;
+    let daysUpdated = 0;
     for(let i=1;i<rows.length;i++){
       const r = rows[i];
       if(!r || r.every(c => c===null || c==='')) continue;
-      const first = (r[0]||'').toString().trim();
+      const dateStr = (r[dateIdx]||'').toString().trim();
+      const dm = dateStr.match(/(\d{1,2})\/(\d{2})\/(\d{2})/);
+      if(!dm) continue;
+      const day = parseInt(dm[1],10);
+      const monthIdx = parseInt(dm[2],10) - 1;
+      const year = 2000 + parseInt(dm[3],10);
+      const labStarted = r[labStartedIdx];
+      const labFinished = r[labFinishedIdx];
+      const avgFinish = r[avgFinishIdx];
+      if(typeof labStarted!=='number' || typeof labFinished!=='number') continue;
 
-      if(SECTION_NAMES.some(n => n.toLowerCase()===first.toLowerCase())){
-        currentSection = SECTION_NAMES.find(n => n.toLowerCase()===first.toLowerCase());
-        continue;
-      }
-      if(first.toLowerCase()==='job number'){
-        if(coaIdx===-1) coaIdx = r.findIndex(h => /coa wait time/i.test((h||'').toString()));
-        continue;
-      }
-      // subtotal row: first two cells blank, a number sits in column C (index 2)
-      if(currentSection && (r[0]===null||r[0]==='') && (r[1]===null||r[1]==='') && typeof r[2]==='number'){
-        sectionCounts[currentSection] = r[2];
-        continue;
-      }
-      // data row within a section
-      if(currentSection && first){
-        if(currentSection==='Lab Finished' && coaIdx!==-1 && typeof r[coaIdx]==='number' && !isNaN(r[coaIdx])){
-          labFinishedCoaVals.push(r[coaIdx]);
-        }
-      }
+      const fields = {cargoInBacklog: labStarted + labFinished};
+      if(typeof avgFinish==='number' && !isNaN(avgFinish)) fields.turnaroundHours = avgFinish;
+      lastMonthKey = saveDayFields(year, monthIdx, day, fields);
+      daysUpdated++;
     }
 
-    if(sectionCounts['Lab Started']===undefined || sectionCounts['Lab Finished']===undefined){
-      showStatus3('error', 'Could not find the Lab Started / Lab Finished section totals in the Print tab.');
+    if(daysUpdated===0){
+      showStatus3('error', 'No usable date rows found in the L2 tab.');
       fileNameKpi3.textContent = '';
       return;
     }
 
-    const cargoInBacklog = sectionCounts['Lab Started'] + sectionCounts['Lab Finished'];
-    const avgHours = labFinishedCoaVals.length ? labFinishedCoaVals.reduce((a,b)=>a+b,0)/labFinishedCoaVals.length : null;
-    const monthKey = saveDayFields(year, monthIdx, day, {cargoInBacklog, turnaroundHours: avgHours});
     fileNameKpi3.textContent = 'Loaded: ' + file.name;
-    showStatus3('ok', 'Saved backlog count and turnaround for ' + day + ' ' + MONTH_NAMES[monthIdx] + ' ' + year + '.');
-    populateMonthSelect(monthKey);
+    showStatus3('ok', 'Populated ' + daysUpdated + ' day' + (daysUpdated===1?'':'s') + ' of backlog count and turnaround from the L2 tab.');
+    populateMonthSelect(lastMonthKey);
     renderTurnaroundPage();
   } catch(err){
     showStatus3('error', 'Could not parse this Excel file: ' + err.message);
