@@ -38,7 +38,7 @@
   header .logo{font-weight:800; font-size:20px; letter-spacing:0.5px; color:var(--bhp-orange);}
   header h1{font-size:16px; font-weight:600; margin:0; color:#fff;}
   header p{margin:2px 0 0; font-size:12px; color:#B7BCC4;}
-  main{max-width:1200px; margin:0 auto; padding:20px 24px 60px;}
+  main{max-width:2200px; margin:0 auto; padding:20px 40px 60px;}
 
   .upload-zone{
     background:var(--card); border:2px dashed var(--line); border-radius:10px; padding:28px;
@@ -177,7 +177,7 @@
 <header>
   <div class="logo">BHP</div>
   <div>
-    <h1 id="pageTitle">COA Backlog Monitor <span style="font-weight:400;color:#B7BCC4;">v27</span></h1>
+    <h1 id="pageTitle">COA Backlog Monitor <span style="font-weight:400;color:#B7BCC4;">v30</span></h1>
     <p id="pageSubtitle">PMLB — upload a COA Status PDF export to view it interactively</p>
   </div>
   <div class="nav-tabs">
@@ -264,7 +264,7 @@
 </section>
 
   <footer style="margin-top:32px; padding-top:14px; border-top:1px solid var(--line); font-size:11px; color:var(--ink-soft);">
-    COA Backlog Interactive Tool — v27
+    COA Backlog Interactive Tool — v30
   </footer></main>
 
 <div id="printArea"></div>
@@ -272,7 +272,7 @@
 <script>
 pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
-const COLS = ["COA Status","Days","Berth","Inspection Lot","Nomination Number","Product","Customer Name","Vessel Name","Actual Time Arrived","OST","OFT","WMT","CCLAS","Lvl 3"];
+const COLS = ["COA Status","Days","Berth","Inspection Lot","Nomination Number","Product","Customer Name","Vessel Name","Actual Time Arrived","OST","OFT","WMT","CCLAS","Lvl 3 / Quarantine"];
 const REF_WIDTH = 1189.44;
 const BOUND_X0 = [21.4986,69.488,117.568,168.56,233.36,284.352,332.432,496.224,595.824,646.816,724.416,795.216,930.416,978.496];
 const TABLE_END = 1040.805;
@@ -511,14 +511,16 @@ function card(label, value, sub){
   return '<div class="card"><div class="label">'+label+'</div><div class="value">'+value+'</div><div class="sub">'+sub+'</div></div>';
 }
 
-const HIDDEN_COLS = [0,4,8];
-const COL_WIDTHS = {1:'6%',2:'4%',3:'8%',5:'5%',6:'17%',7:'12%',9:'8%',10:'11%',11:'7%',12:'5%',13:'6%'};
+const HIDDEN_COLS = [0,8];
+const COL_WIDTHS = {1:'6%',2:'4%',3:'8%',4:'8%',5:'5%',6:'15%',7:'11%',9:'7%',10:'10%',11:'6%',12:'5%',13:'6%'};
 const EXTRA_COLS_HTML = '<col style="width:8%">';
+// Visible column order — CCLAS (12) and Inspection Lot (3) swapped from their original PDF positions.
+const DISPLAY_ORDER = [1,2,12,4,5,6,7,9,10,11,3,13];
 function renderTableHead(){
   const headRow = document.getElementById('headRow');
   const colgroup = document.getElementById('colGroup');
-  colgroup.innerHTML = COLS.map((c,i) => HIDDEN_COLS.includes(i) ? '' : '<col style="width:'+(COL_WIDTHS[i]||'8%')+'">').join('') + EXTRA_COLS_HTML;
-  headRow.innerHTML = COLS.map((c,i) => HIDDEN_COLS.includes(i) ? '' : '<th data-idx="'+i+'">'+c+'</th>').join('')
+  colgroup.innerHTML = DISPLAY_ORDER.map(i => '<col style="width:'+(COL_WIDTHS[i]||'8%')+'">').join('') + EXTRA_COLS_HTML;
+  headRow.innerHTML = DISPLAY_ORDER.map(i => '<th data-idx="'+i+'">'+COLS[i]+'</th>').join('')
     + '<th style="width:70px;text-align:center;">Waiting Lump</th>';
   headRow.querySelectorAll('th[data-idx]').forEach(th => {
     th.addEventListener('click', () => {
@@ -568,19 +570,26 @@ function applyFiltersAndRender(){
     } else {
       lvl3Cell = '<input type="checkbox" class="lvl3-check" '+(state.lvl3?'checked':'')+'>';
     }
+    const cellForIdx = (idx) => {
+      switch(idx){
+        case 1: return '<td>'+r.backlogDays+'</td>';
+        case 2: return '<td>'+esc(r.berth)+'</td>';
+        case 3: return '<td>'+esc(r.poNo)+'</td>';
+        case 4: return '<td>'+esc(r.inspectionLot)+'</td>';
+        case 5: return '<td>'+esc(r.cclasCode)+'</td>';
+        case 6: return '<td class="customer">'+esc(r.customer)+'</td>';
+        case 7: return '<td class="vessel">'+esc(r.vessel)+'</td>';
+        case 9: return '<td>'+esc(to24hr(r.officialStart))+'</td>';
+        case 10: return '<td>'+esc(to24hr(r.officialFinish))+'</td>';
+        case 11: return '<td>'+esc(r.wmt)+'</td>';
+        case 12: return '<td>'+esc(r.consig)+'</td>';
+        case 13: return '<td style="text-align:center;" class="no-strike">'+lvl3Cell+'</td>';
+        default: return '<td></td>';
+      }
+    };
     const cls = (overdue?'overdue ':'') + (port?'port ':'') + (processed?'processed':'');
     return '<tr class="'+cls.trim()+'" data-id="'+r.id+'">'
-      + '<td>'+r.backlogDays+'</td>'
-      + '<td>'+esc(r.berth)+'</td>'
-      + '<td>'+esc(r.poNo)+'</td>'
-      + '<td>'+esc(r.cclasCode)+'</td>'
-      + '<td class="customer">'+esc(r.customer)+'</td>'
-      + '<td class="vessel">'+esc(r.vessel)+'</td>'
-      + '<td>'+esc(r.officialStart)+'</td>'
-      + '<td>'+esc(r.officialFinish)+'</td>'
-      + '<td>'+esc(r.wmt)+'</td>'
-      + '<td>'+esc(r.consig)+'</td>'
-      + '<td style="text-align:center;" class="no-strike">'+lvl3Cell+'</td>'
+      + DISPLAY_ORDER.map(cellForIdx).join('')
       + '<td style="text-align:center;" class="no-strike"><input type="checkbox" class="lump-check" '+(state.waitingLump?'checked':'')+'></td>'
       + '</tr>';
   }).join('');
@@ -591,6 +600,16 @@ function applyFiltersAndRender(){
 
 function esc(s){
   return (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function to24hr(s){
+  s = (s||'').toString();
+  return s.replace(/(\d{1,2}):(\d{2})\s*(AM|PM)/i, (m, h, min, ap) => {
+    h = parseInt(h,10);
+    if(/PM/i.test(ap) && h!==12) h += 12;
+    if(/AM/i.test(ap) && h===12) h = 0;
+    return String(h).padStart(2,'0') + ':' + min;
+  });
 }
 
 document.getElementById('searchBox').addEventListener('input', applyFiltersAndRender);
@@ -624,7 +643,7 @@ document.getElementById('toggleNotReady').addEventListener('click', (e) => {
 });
 
 document.getElementById('clearRowDataBtn').addEventListener('click', () => {
-  if(!confirm('Clear all saved row marks (processed, Lvl 3, Waiting Lump) for this data?')) return;
+  if(!confirm('Clear all saved row marks (processed, Lvl 3 / Quarantine, Waiting Lump) for this data?')) return;
   clearRowState();
   applyFiltersAndRender();
 });
@@ -652,8 +671,8 @@ document.getElementById('printReportBtn').addEventListener('click', () => {
       + '<td>'+esc(r.cclasCode)+'</td>'
       + '<td>'+esc(r.customer)+'</td>'
       + '<td>'+esc(r.vessel)+'</td>'
-      + '<td>'+esc(r.officialStart)+'</td>'
-      + '<td>'+esc(r.officialFinish)+'</td>'
+      + '<td>'+esc(to24hr(r.officialStart))+'</td>'
+      + '<td>'+esc(to24hr(r.officialFinish))+'</td>'
       + '<td>'+esc(r.wmt)+'</td>'
       + '<td>'+esc(r.consig)+'</td>'
       + '<td>'+(isLvl3 ? 'LVL 3' : '')+'</td>'
@@ -662,7 +681,7 @@ document.getElementById('printReportBtn').addEventListener('click', () => {
   };
 
   const headerRow = '<tr><th>Days</th><th>Berth</th><th>Product</th><th>Customer</th>'
-    + '<th>Vessel</th><th>OST</th><th>OFT</th><th>WMT</th><th>CCLAS</th><th>Lvl 3</th><th>Waiting Lump</th></tr>';
+    + '<th>Vessel</th><th>OST</th><th>OFT</th><th>WMT</th><th>CCLAS</th><th>Lvl 3 / Quarantine</th><th>Waiting Lump</th></tr>';
 
   const section = (title, rows, cls) => {
     const table = rows.length
@@ -696,7 +715,7 @@ const NAV = [
 NAV.forEach(entry => {
   entry.btn.addEventListener('click', () => {
     NAV.forEach(e => { e.btn.classList.toggle('active', e===entry); e.page.classList.toggle('hidden', e!==entry); });
-    pageTitle.innerHTML = entry.title + ' <span style="font-weight:400;color:#B7BCC4;">v27</span>';
+    pageTitle.innerHTML = entry.title + ' <span style="font-weight:400;color:#B7BCC4;">v30</span>';
     pageSubtitle.textContent = entry.sub;
     if(entry.onShow) entry.onShow();
   });
