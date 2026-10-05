@@ -177,7 +177,7 @@
 <header>
   <div class="logo">BHP</div>
   <div>
-    <h1 id="pageTitle">COA Backlog Monitor <span style="font-weight:400;color:#B7BCC4;">v30</span></h1>
+    <h1 id="pageTitle">COA Backlog Monitor <span style="font-weight:400;color:#B7BCC4;">v31</span></h1>
     <p id="pageSubtitle">PMLB — upload a COA Status PDF export to view it interactively</p>
   </div>
   <div class="nav-tabs">
@@ -264,7 +264,7 @@
 </section>
 
   <footer style="margin-top:32px; padding-top:14px; border-top:1px solid var(--line); font-size:11px; color:var(--ink-soft);">
-    COA Backlog Interactive Tool — v30
+    COA Backlog Interactive Tool — v31
   </footer></main>
 
 <div id="printArea"></div>
@@ -715,7 +715,7 @@ const NAV = [
 NAV.forEach(entry => {
   entry.btn.addEventListener('click', () => {
     NAV.forEach(e => { e.btn.classList.toggle('active', e===entry); e.page.classList.toggle('hidden', e!==entry); });
-    pageTitle.innerHTML = entry.title + ' <span style="font-weight:400;color:#B7BCC4;">v30</span>';
+    pageTitle.innerHTML = entry.title + ' <span style="font-weight:400;color:#B7BCC4;">v31</span>';
     pageSubtitle.textContent = entry.sub;
     if(entry.onShow) entry.onShow();
   });
@@ -865,7 +865,11 @@ async function parseKpi3(file){
 
     fileNameKpi3.textContent = 'Loaded: ' + file.name;
     showStatus3('ok', 'Populated ' + daysUpdated + ' day' + (daysUpdated===1?'':'s') + ' of backlog count and turnaround from the L2 tab.');
-    populateMonthSelect(lastMonthKey);
+    const now = new Date();
+    const todayMonthKey = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
+    const store = loadTurnaroundStore();
+    const preferredKey = store[todayMonthKey] ? todayMonthKey : lastMonthKey;
+    populateMonthSelect(preferredKey);
     renderTurnaroundPage();
   } catch(err){
     showStatus3('error', 'Could not parse this Excel file: ' + err.message);
@@ -987,6 +991,15 @@ function renderTurnaroundPage(){
     + dataRow('From PQ report — CoA\'s in Backlog', e => e.pqBacklogCount)
     + dataRow('From PQ report — Highest Day in Backlog', e => e.pqHighestDay)
     + '</tbody>';
+
+  // If this is the current real-world month, scroll to today's column so it's visible without manual scrolling.
+  const todayNow = new Date();
+  const isCurrentMonth = (y === todayNow.getFullYear()) && (m === todayNow.getMonth()+1);
+  if(isCurrentMonth){
+    const scrollWrap = document.getElementById('turnaroundScroll');
+    const todayX = dayCenterX(todayNow.getDate());
+    scrollWrap.scrollLeft = Math.max(0, todayX - scrollWrap.clientWidth/2);
+  }
 }
 
 // ---------- Restore saved session on page load ----------
